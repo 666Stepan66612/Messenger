@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	// Загрузка конфигурации из переменных окружения
+	// download configuration from environment variables
 	dbHost := getEnv("DB_HOST", "localhost")
 	dbPort := getEnv("DB_PORT", "5432")
 	dbUser := getEnv("DB_USER", "postgres")
@@ -23,7 +23,7 @@ func main() {
 	dbName := getEnv("DB_NAME", "messenger_auth")
 	serverPort := getEnv("SERVER_PORT", "8080")
 
-	// Подключение к базе данных
+	// Connect to the database
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		dbHost, dbPort, dbUser, dbPassword, dbName)
 
@@ -33,13 +33,13 @@ func main() {
 	}
 	defer db.Close()
 
-	// Проверка подключения к БД
+	// check the database connection
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 	log.Println("Successfully connected to database")
 
-	// Настройка Gin
+	// Set Gin mode
 	if getEnv("GIN_MODE", "debug") == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -61,16 +61,16 @@ func main() {
 		c.Next()
 	})
 
-	// Инициализация handlers
+	// initialize handlers and business logic
 	authHandler := handlers.NewAuthHandler(db)
 	sessionBiz := business.NewSessionBusiness(db)
 
-	// Публичные маршруты
+	// Public routes
 	router.POST("/register", authHandler.Register)
 	router.POST("/login", authHandler.Login)
 	router.POST("/refresh", authHandler.Refresh)
 
-	// Защищенные маршруты
+	// Protected routes
 	protected := router.Group("/")
 	protected.Use(middleware.AuthMiddleware(sessionBiz))
 	{
@@ -87,7 +87,7 @@ func main() {
 		})
 	})
 
-	// Запуск сервера
+	// start the server
 	addr := ":" + serverPort
 	log.Printf("Starting server on %s", addr)
 	if err := router.Run(addr); err != nil {
@@ -95,7 +95,7 @@ func main() {
 	}
 }
 
-// getEnv получает переменную окружения или возвращает значение по умолчанию
+// getEnv retrieves environment variable or returns default value
 func getEnv(key, defaultValue string) string {
 	value := os.Getenv(key)
 	if value == "" {
