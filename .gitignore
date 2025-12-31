@@ -4,8 +4,8 @@
 *.dll
 *.so
 *.dylib
-auth-service
-cmd/auth-service
+/auth-service/auth-service
+/auth-service/cmd/auth-service
 
 # Test binary
 *.test
