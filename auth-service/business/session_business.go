@@ -67,7 +67,7 @@ func (b *SessionBusiness) ClearSessionCookies(w http.ResponseWriter) {
 }
 
 // CreateSession generates a new session with refresh token, stores it in DB, and sets cookies
-func (b *SessionBusiness) CreateSession(w http.ResponseWriter, userID uuid.UUID, userAgent, ipAddress string) (string, error) {
+func (b *SessionBusiness) CreateSession(w http.ResponseWriter, userID uuid.UUID) (string, error) {
 	refreshToken := make([]byte, 32)
 	if _, err := rand.Read(refreshToken); err != nil {
 		return "", err
@@ -80,8 +80,8 @@ func (b *SessionBusiness) CreateSession(w http.ResponseWriter, userID uuid.UUID,
 	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 
 	_, err := b.db.Exec(`
-	INSERT INTO sessions (id, user_id, token_hash, user_agent,ip_address, expires_at)
-	VALUES ($1, $2, $3, $4, $5, $6)`, sessionID, userID, refreshTokenHash, userAgent, ipAddress, expiresAt)
+	INSERT INTO sessions (id, user_id, token_hash, expires_at)
+	VALUES ($1, $2, $3, $4)`, sessionID, userID, refreshTokenHash, expiresAt)
 
 	if err != nil {
 		return "", err
@@ -172,14 +172,11 @@ func (b *SessionBusiness) RefreshSession(w http.ResponseWriter, r *http.Request)
 		return "", err
 	}
 
-	userAgent := r.UserAgent()
-	ipAddress := r.RemoteAddr
-
 	if err := b.DeleteSession(r); err != nil {
 		return "", err
 	}
 
-	return b.CreateSession(w, userID, userAgent, ipAddress)
+	return b.CreateSession(w, userID)
 }
 
 // LogoutAll revokes all sessions for a specific user by adding all tokens to revoked list

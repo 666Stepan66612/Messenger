@@ -7,6 +7,7 @@ import (
 
 	"auth-service/crypto"
 	"auth-service/models"
+	"auth-service/security"
 
 	"github.com/google/uuid"
 )
@@ -22,6 +23,17 @@ func NewUserBusiness(db *sql.DB) *UserBusiness {
 
 // CreateUser registers a new user with encrypted blob, hashed password, and initial settings
 func (b *UserBusiness) CreateUser(username, password string) (*models.User, error) {
+	// Validate username
+	username = security.SanitizeInput(username)
+	if err := security.ValidateUsername(username); err != nil {
+		return nil, err
+	}
+
+	// Validate password strength
+	if err := security.ValidatePassword(password); err != nil {
+		return nil, err
+	}
+
 	var exists bool
 	err := b.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)`, username).Scan(&exists)
 	if err != nil {

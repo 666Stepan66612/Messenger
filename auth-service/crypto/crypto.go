@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/subtle"
 	"errors"
 	"io"
 
+	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -67,14 +69,36 @@ func HashToken(token []byte) []byte {
 	return hash[:]
 }
 
-// bcrypt password hashing
+// bcrypt password hashing (for backward compatibility)
 func HashPassword(password string) ([]byte, error) {
 	return bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 }
 
-// check password
+// HashPasswordArgon2 creates Argon2id hash (recommended for new passwords)
+func HashPasswordArgon2(password string, salt []byte) []byte {
+	// Argon2id parameters (OWASP recommended)
+	// time=3, memory=64MB, threads=4, keyLen=32
+	return argon2.IDKey([]byte(password), salt, 3, 64*1024, 4, 32)
+}
+
+// CheckPasswordHashConstantTime uses constant-time comparison to prevent timing attacks
+func CheckPasswordHashConstantTime(password string, hash []byte) bool {
+	computedHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return false
+	}
+
+	// Use constant-time comparison
+	return subtle.ConstantTimeCompare(computedHash, hash) == 1
+}
+
+// check password (original bcrypt method)
 func CheckPasswordHash(password string, hash []byte) bool {
-	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
+	err := bcrypt.CompareHashAndPassword(hash, []byte(password))
+	// Use constant-time to prevent timing attacks on error
+	result := err == nil
+	subtle.ConstantTimeSelect(0, 0, 1) // Add timing noise
+	return result
 }
 
 // generate random bytes

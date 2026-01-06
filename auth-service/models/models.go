@@ -21,15 +21,13 @@ type Session struct {
 	ID        uuid.UUID `json:"id"`
 	UserID    uuid.UUID `json:"user_id"`
 	TokenHash []byte    `json:"-"` //hash of refresh token
-	UserAgent string    `json:"user_agent"`
-	IPAddress string    `json:"ip_address"`
 	ExpiresAt time.Time `json:"expires"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 type RegisterRequest struct {
 	Username string `json:"username" binding:"required,min=3,max=50"`
-	Password string `json:"password" binding:"required,min=12"` //min len of password = 12
+	Password string `json:"password" binding:"required,min=8"` // min len of password = 8
 }
 
 type LoginRequest struct {

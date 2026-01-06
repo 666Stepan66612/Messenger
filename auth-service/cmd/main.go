@@ -9,6 +9,7 @@ import (
 	"auth-service/business"
 	"auth-service/handlers"
 	"auth-service/middleware"
+	"auth-service/security"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
@@ -46,20 +47,21 @@ func main() {
 
 	router := gin.Default()
 
-	// CORS middleware
-	router.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", getEnv("CORS_ORIGIN", "*"))
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+	// Security middleware
+	router.Use(security.SecureHeadersMiddleware())
 
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
+	// CORS middleware (use security package version)
+	allowedOrigins := []string{}
+	if origin := getEnv("CORS_ORIGIN", ""); origin != "" && origin != "*" {
+		allowedOrigins = append(allowedOrigins, origin)
+	}
+	router.Use(security.CORSMiddleware(allowedOrigins))
 
-		c.Next()
-	})
+	// Rate limiting middleware
+	serverSalt := getEnv("SERVER_SALT", "change-this-in-production-to-random-value")
+	rateLimiter := security.NewRateLimiter(db, serverSalt)
+	defer rateLimiter.Stop()
+	router.Use(security.RateLimitMiddleware(rateLimiter))
 
 	// initialize handlers and business logic
 	authHandler := handlers.NewAuthHandler(db)
@@ -77,6 +79,15 @@ func main() {
 		protected.POST("/logout", authHandler.Logout)
 		protected.POST("/change-password", authHandler.ChangePassword)
 		protected.GET("/validate", authHandler.Validate)
+
+		// 2FA routes
+		protected.POST("/2fa/setup", authHandler.Setup2FA)
+		protected.POST("/2fa/enable", authHandler.Enable2FA)
+		protected.POST("/2fa/disable", authHandler.Disable2FA)
+		protected.POST("/2fa/verify", authHandler.Verify2FA)
+
+		// Security audit
+		protected.GET("/security/events", authHandler.GetSecurityEvents)
 	}
 
 	// Health check

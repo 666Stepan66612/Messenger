@@ -6,21 +6,29 @@ import (
 
 	"auth-service/business"
 	"auth-service/models"
+	"auth-service/security"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AuthHandler struct {
-	db         *sql.DB
-	userBiz    *business.UserBusiness
-	sessionBiz *business.SessionBusiness
+	db          *sql.DB
+	userBiz     *business.UserBusiness
+	sessionBiz  *business.SessionBusiness
+	totpManager *security.TOTPManager
+	auditLogger *security.AuditLogger
+	rateLimiter *security.RateLimiter
 }
 
 func NewAuthHandler(db *sql.DB) *AuthHandler {
+	serverSalt := "default-salt-change-in-production"
 	return &AuthHandler{
-		db:         db,
-		userBiz:    business.NewUserBusiness(db),
-		sessionBiz: business.NewSessionBusiness(db),
+		db:          db,
+		userBiz:     business.NewUserBusiness(db),
+		sessionBiz:  business.NewSessionBusiness(db),
+		totpManager: security.NewTOTPManager(db),
+		auditLogger: security.NewAuditLogger(db),
+		rateLimiter: security.NewRateLimiter(db, serverSalt),
 	}
 }
 
@@ -47,20 +55,24 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Username already taken"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	refreshToken, err := h.sessionBiz.CreateSession(
 		c.Writer,
 		user.ID,
-		c.Request.UserAgent(),
-		c.ClientIP(),
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
 		return
 	}
+
+	// Audit log
+	ipHash := h.rateLimiter.HashIP(c.ClientIP())
+	h.auditLogger.Log(security.EventRegister, &user.ID, ipHash, map[string]interface{}{
+		"username": user.Username,
+	})
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message":        "User created successfully",
@@ -91,30 +103,58 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	user, err := h.userBiz.Login(req.Username, req.Password)
+	ipHash := h.rateLimiter.HashIP(c.ClientIP())
+
 	if err != nil {
+		// Audit failed login
+		h.auditLogger.Log(security.EventLoginFailed, nil, ipHash, map[string]interface{}{
+			"username": req.Username,
+		})
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
+	// Check for suspicious activity
+	suspicious, reason := h.auditLogger.DetectSuspiciousActivity(user.ID, ipHash)
+	if suspicious {
+		h.auditLogger.Log(security.EventSuspiciousActivity, &user.ID, ipHash, map[string]interface{}{
+			"reason": reason,
+		})
+	}
+
+	// Check if 2FA is enabled
+	has2FA, _ := h.totpManager.Is2FAEnabled(user.ID)
+
 	refreshToken, err := h.sessionBiz.CreateSession(
 		c.Writer,
 		user.ID,
-		c.Request.UserAgent(),
-		c.ClientIP(),
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	// Audit successful login
+	h.auditLogger.Log(security.EventLoginSuccess, &user.ID, ipHash, map[string]interface{}{
+		"username":    user.Username,
+		"2fa_enabled": has2FA,
+	})
+
+	response := gin.H{
 		"user_id":        user.ID,
 		"username":       user.Username,
 		"refresh_token":  refreshToken,
 		"encrypted_blob": user.EncryptedBlob,
 		"blob_salt":      user.BlobSalt,
 		"key_version":    user.KeyVersion,
-	})
+		"requires_2fa":   has2FA,
+	}
+
+	if suspicious {
+		response["warning"] = "Suspicious activity detected: " + reason
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 /*
