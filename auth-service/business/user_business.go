@@ -53,10 +53,15 @@ func (b *UserBusiness) CreateUser(username, password string) (*models.User, erro
 		return nil, err
 	}
 
+	// Generate master key for encrypting chat keys
+	masterKey, err := crypto.RandomBytes(32)
+	if err != nil {
+		return nil, err
+	}
+
 	userBlob := map[string]interface{}{
-		"version":  1,
-		"keys":     map[string]string{}, //chat_id -> encrypted_chat_key
-		"contacts": []string{},
+		"version":    1,
+		"master_key": masterKey, // Main key for encrypting chat keys
 		"settings": map[string]interface{}{
 			"theme":         "dark",
 			"notifications": true,

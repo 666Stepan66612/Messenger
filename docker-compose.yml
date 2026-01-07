@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  postgres:
+  auth-postgres:
     image: postgres:15-alpine
     container_name: auth-postgres
     environment:
@@ -11,8 +11,26 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - auth_postgres_data:/var/lib/postgresql/data
       - ./auth-service/migrations/migrations.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  key-postgres:
+    image: postgres:15-alpine
+    container_name: key-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: messenger_keys
+    ports:
+      - "5433:5432"
+    volumes:
+      - key_postgres_data:/var/lib/postgresql/data
+      - ./key-service/migrations/migrations.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -23,7 +41,7 @@ services:
     build: ./auth-service
     container_name: auth-service
     environment:
-      DB_HOST: postgres
+      DB_HOST: auth-postgres
       DB_PORT: 5432
       DB_USER: postgres
       DB_PASSWORD: postgres
@@ -34,9 +52,30 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
+      auth-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  key-service:
+    build: ./key-service
+    container_name: key-service
+    environment:
+      DB_HOST: key-postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: messenger_keys
+      SERVER_PORT: 8081
+      GIN_MODE: release
+      CORS_ORIGIN: "*"
+      SERVER_SALT: "your-server-salt-change-in-production"
+    ports:
+      - "8081:8081"
+    depends_on:
+      key-postgres:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  postgres_data:
+  auth_postgres_data:
+  key_postgres_data:
